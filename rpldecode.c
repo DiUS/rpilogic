@@ -6,6 +6,7 @@
 
 **********************************************************************/
 
+#define _BSD_SOURCE
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,14 +14,34 @@
 #include <string.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <time.h>
 
 static double offset=0;
 static bool combined_file=false;
+static bool vcd_file=false;
+static int hertz=25000000; // default frequency
 
 void syntax (const char *name)
 {
-  fprintf (stderr, "Syntax: %s -f <file> [-g <offset_for_gnuplot>] [-o <combined_output_file>] <gpio:name...>\n\n", name);
+  fprintf (stderr, "Syntax: %s -f <file> [-h <sample_freq>] [-g <offset_for_gnuplot>] [-o <combined_output_file>] [-v <vcd_output_file>] <gpio:name...>\n\n", name);
   exit (1);
+}
+
+static char symbol(int i)
+{
+  return 'A'+i;
+}
+
+static void print_vcd_point(FILE* f, int ind, int x, double val)
+{
+  static int last_time=-1;
+
+  if (x!=last_time)
+  {
+    fprintf(f,"#%d\n",x);
+    last_time=x;
+  }
+  fprintf(f,"%d%c\n",(int)val,symbol(ind));
 }
 
 static void print_point(FILE* f, int ind, int x, double val)
@@ -28,8 +49,14 @@ static void print_point(FILE* f, int ind, int x, double val)
   char t[100];
   char out[100];
 
+  if (vcd_file)
+  {
+    print_vcd_point(f,ind,x,val);
+    return;
+  }
+  
   if (!combined_file || ind==0)
-    sprintf(t,"%u\t",x);
+    sprintf(t,"%f\t",(double)x/(double)hertz);
   else
     t[0]=0;
 
@@ -55,19 +82,29 @@ int main (int argc, char *argv[])
 {
   const char *fname = NULL;
   const char *oname = NULL;
+  const char *vname = NULL;
+  
   int opt;
 
-  while ((opt = getopt (argc, argv, "f:g:o:")) != -1)
+  while ((opt = getopt (argc, argv, "f:g:o:v:h:")) != -1)
   {
     switch (opt)
     {
       case 'f': fname = optarg; break;
       case 'o': oname = optarg; break;
+      case 'v': vname = optarg; break;
+      case 'h': hertz=atoi(optarg); break;
       case 'g': offset=atof(optarg); break;
       default: syntax (argv[0]);
     }
   }
 
+  if (vname && oname)
+  {
+    fprintf(stderr,"Only one of -v and -o may be used\n");
+    exit(3);
+  }
+  
   int nselected = 0;
   struct {
     unsigned pin;
@@ -89,6 +126,18 @@ int main (int argc, char *argv[])
     combined_file=true;
   }
 
+  FILE* vf=NULL;  
+  if (vname)
+  {
+    vf=fopen(vname,"w");
+    if (!vf)
+    {
+      perror(vname);
+      return 4;
+    }
+    vcd_file=true;
+  }
+  
   while (argc > optind)
   {
     --argc;
@@ -100,7 +149,7 @@ int main (int argc, char *argv[])
     selected[nselected].name = colon + 1;
     if (selected[nselected].pin > 31)
       syntax (argv[0]);
-    selected[nselected].f = of?:fopen (selected[nselected].name, "w");
+    selected[nselected].f = vf?:(of?:fopen (selected[nselected].name, "w"));
     if (!selected[nselected].f)
     {
       perror (selected[nselected].name);
@@ -129,14 +178,33 @@ int main (int argc, char *argv[])
     fprintf(of,"\n");
   }
 
-  for (int i=0; i < nselected; ++i)
-    print_point(selected[i].f,i,0,-0.25);
-  print_end(of);
+  if (vf)
+  {
+    time_t now=time(NULL);
+    char* ts=strdup(ctime(&now));
+    *strchr(ts,'\n')=0;
+    fprintf(vf,"$date %s $end\n",ts);
+    free(ts);
+    fprintf(vf,"$version rpldecode V1 $end\n");
+    fprintf(vf,"$timescale %f ns $end\n",1e9/(double)hertz);
+    fprintf(vf,"$scope module top $end\n");
+    for (int i=0; i < nselected; ++i)
+      fprintf(vf,"$var wire 1 %c %s $end\n", symbol(i), selected[i].name);
 
-  for (int i=0; i < nselected; ++i)
-    print_point(selected[i].f,i,0,1.25);
-  print_end(of);
-
+    fprintf(vf,"$upscope $end\n");
+    fprintf(vf,"$enddefinitions $end\n");
+  }
+  else
+  { // force useful y axis scaling for gnuplot
+    for (int i=0; i < nselected; ++i)
+      print_point(selected[i].f,i,0,-0.25);
+    print_end(of);
+    
+    for (int i=0; i < nselected; ++i)
+      print_point(selected[i].f,i,0,1.25);
+    print_end(of);
+  }
+  
   uint32_t count=0;
   while (!feof (f))
   {
@@ -207,6 +275,10 @@ int main (int argc, char *argv[])
              oname,
              selected[i].name);
     printf("\n");
+  }
+  else if (vf)
+  {
+    printf("gtkwave -d %s\n",vname);
   }
   else
   {
