@@ -59,7 +59,7 @@ Example:
 
 ### rpldecode syntax
 
-  `rpldecode  -f <file> [-g <offset_for_gnuplot>] [-o <combined_output_file>] <gpio:name...>`
+  `rpldecode  -f <file> [-h <sample_freq>] [-g <offset_for_gnuplot>] [-o <combined_output_file>] [-v <vcd_output_file>] <gpio:name...>'
 
 The output filename is mandatory, as is at least one GPIO definition. These
 definitions simply map a GPIO pin number to a logical name. Unless the -o
@@ -73,6 +73,9 @@ The **-o** option can be used create a single, multi-column file rather than
 the default which is one file per GPIO. Each column is named per the GPIO
 definition.
 
+The **-v** option instructs rpldecode to create a VCD file instead, for easy
+consumption by gtkwave.
+
 Example:
   rpldecode -f gpio.log -g 2 8:csel 7:miso 25:mosi 23:sck
 
@@ -85,3 +88,7 @@ We also suggest the use of "gnuplot" to view the captured data with:
   sudo apt-get install gnuplot-x11
   http://www.gnuplot.info/
 
+For large captures (with many signal transitions) you might want to use
+"gtkwave" instead:
+  sudo apt-get install gtkwave
+   
